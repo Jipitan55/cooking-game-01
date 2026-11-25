@@ -207,8 +207,11 @@ export function autopilot(world) {
  * busy station, a dish mid-assembly on the plating island, and `ticketCount`
  * tickets with one flashing red. Applied on top of a real autopilot run, so
  * the score, combo and served dishes underneath are genuine.
+ * When `burnt` is true, the grill's second slot holds a fish that really did
+ * burn (ready + the 6 s grace, t = 12 > 5 + 6), drawn charred with a smoke
+ * wisp, so the burn state reads in the still frame.
  */
-function stageBusyKitchen(world, ticketCount) {
+function stageBusyKitchen(world, ticketCount, burnt) {
   world.level = Math.max(world.level, 3);
   while (world.orders.length < ticketCount) spawnOrder(world);
   world.orders = world.orders.slice(0, ticketCount);
@@ -219,11 +222,19 @@ function stageBusyKitchen(world, ticketCount) {
   world.cookers.stove = [{ kind: 'pasta', t: 2.0, state: 'cooking' }, null];
   world.cookers.grill = [{ kind: 'fish', t: 2.5, state: 'cooking' }, null];
   world.cookers.oven = [{ kind: 'dough', t: 3.0, state: 'cooking' }];
+  if (burnt) {
+    // Second grill slot: a fish left too long, now burnt (see the doc comment).
+    world.cookers.grill[1] = { kind: 'fish', t: 12, state: 'burnt' };
+  }
   // Half-chopped tomato on the board, chef standing at it mid-swing.
+  // The chef stands a step back from the board (260, 250): close enough to
+  // read as working at it (within reach of the board's use-point), but his
+  // head, the held tomato and its name tag all clear the CHOPPING BOARD
+  // label above him.
   world.chopping = { kind: 'tomato', t: 0.6, total: 1.2 };
   world.chef.hands = { kind: 'tomato', state: 'raw' };
   world.chef.x = 260;
-  world.chef.y = 196;
+  world.chef.y = 250;
   world.chef.face = 1;
   world.chef.chopSwing = 1.0;
   world.chef.moving = false;
@@ -247,7 +258,7 @@ export function stageShot(name, world) {
     for (let i = 0; i < PLAY_SECONDS / STEP; i += 1) {
       if (stepWorld(world, STEP, autopilot(world)) & EVENT_OVER) break;
     }
-    stageBusyKitchen(world, 4);
+    stageBusyKitchen(world, 4, true);
     return { screen: world.over ? SCREEN_OVER : SCREEN_PLAY, best: world.score, newRecord: false };
   }
   if (name === 'rush') {
@@ -259,7 +270,7 @@ export function stageShot(name, world) {
       if (plateReadyToServe(world)) break;
       if (stepWorld(world, STEP, autopilot(world)) & EVENT_OVER) break;
     }
-    stageBusyKitchen(world, 5);
+    stageBusyKitchen(world, 5, false);
     return { screen: world.over ? SCREEN_OVER : SCREEN_PLAY, best: world.score, newRecord: false };
   }
   for (let i = 0; i < END_LIMIT_SECONDS / STEP; i += 1) {

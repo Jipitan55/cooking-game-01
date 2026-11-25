@@ -383,7 +383,7 @@ function drawStationLabel(ctx, st, highlight) {
   ctx.fillText(st.label.toUpperCase(), st.x + st.w / 2, st.y + st.h + 12);
 }
 
-function drawFridge(ctx, world) {
+function drawFridge(ctx, world, showLabels) {
   const st = STATIONS.fridge;
   const near = nearestStation(world.chef) === 'fridge';
   ctx.fillStyle = '#90a4ae';
@@ -411,12 +411,10 @@ function drawFridge(ctx, world) {
     ctx.fill();
     drawIngredient(ctx, kind, cx, cy, 11, INGREDIENTS[kind].prep === 'none' ? 'ready' : 'raw');
   });
-  drawStationLabel(ctx, st, near);
-  const sel = INGREDIENTS[world.selected];
-  text(ctx, `Selected: ${sel.name}`, st.x + st.w / 2, st.y + st.h + 28, 12, '#ffe082', 'center');
+  if (showLabels) drawStationLabel(ctx, st, near);
 }
 
-function drawBoard(ctx, world, showProgress) {
+function drawBoard(ctx, world, showProgress, showLabels) {
   const st = STATIONS.board;
   const near = nearestStation(world.chef) === 'board';
   ctx.fillStyle = '#8d6e63';
@@ -452,10 +450,10 @@ function drawBoard(ctx, world, showProgress) {
     ctx.fillRect(-20, -3, 7, 7);
     ctx.restore();
   }
-  drawStationLabel(ctx, st, near);
+  if (showLabels) drawStationLabel(ctx, st, near);
 }
 
-function drawCooker(ctx, world, key, showProgress) {
+function drawCooker(ctx, world, key, showProgress, showLabels) {
   const st = STATIONS[key];
   const near = nearestStation(world.chef) === key;
   const base = key === 'stove' ? '#37474f' : key === 'grill' ? '#4e342e' : '#5d4037';
@@ -534,10 +532,10 @@ function drawCooker(ctx, world, key, showProgress) {
       if (slot.state === 'burnt') text(ctx, 'BURNT!', cx, st.y - 24, 11, '#ff7043', 'center');
     }
   });
-  drawStationLabel(ctx, st, near);
+  if (showLabels) drawStationLabel(ctx, st, near);
 }
 
-function drawPlating(ctx, world) {
+function drawPlating(ctx, world, showLabels) {
   const st = STATIONS.plating;
   const near = nearestStation(world.chef) === 'plating';
   // Island counter: wooden top with a darker side, standing in the middle of the floor.
@@ -561,7 +559,7 @@ function drawPlating(ctx, world) {
         match ? '#66bb6a' : '#fff', 'center');
     }
   }
-  drawStationLabel(ctx, st, near);
+  if (showLabels) drawStationLabel(ctx, st, near);
 }
 
 function drawCustomer(ctx, order, x, y) {
@@ -602,7 +600,7 @@ function drawCustomer(ctx, order, x, y) {
   ctx.fill();
 }
 
-function drawServe(ctx, world) {
+function drawServe(ctx, world, showLabels) {
   const st = STATIONS.serve;
   const near = nearestStation(world.chef) === 'serve';
   ctx.fillStyle = '#6d4c41';
@@ -624,10 +622,10 @@ function drawServe(ctx, world) {
   world.orders.slice(0, 4).forEach((order, i) => {
     drawCustomer(ctx, order, spots[i].x, spots[i].y);
   });
-  drawStationLabel(ctx, st, near);
+  if (showLabels) drawStationLabel(ctx, st, near);
 }
 
-function drawTrash(ctx, world) {
+function drawTrash(ctx, world, showLabels) {
   const st = STATIONS.trash;
   const near = nearestStation(world.chef) === 'trash';
   ctx.fillStyle = '#78909c';
@@ -636,7 +634,7 @@ function drawTrash(ctx, world) {
   ctx.fillStyle = '#546e7a';
   rr(ctx, st.x, st.y, st.w, 10, 4);
   ctx.fill();
-  drawStationLabel(ctx, st, near);
+  if (showLabels) drawStationLabel(ctx, st, near);
 }
 
 function drawChef(ctx, world) {
@@ -689,10 +687,23 @@ function drawChef(ctx, world) {
     ctx.fillRect(-18, -3, 7, 7);
     ctx.restore();
   }
-  // Item in hand, held up.
+  // Item in hand, held up, with its name tagged beside it (dark outline so
+  // the label reads over the board, the floor or the chef's hat, and clamped
+  // so it never runs off the canvas edge).
   if (c.hands) {
     drawIngredient(ctx, c.hands.kind, c.x + c.face * 32, y - 20, 19, c.hands.state);
-    text(ctx, INGREDIENTS[c.hands.kind].name, c.x, y - 68, 12, '#fff', 'center');
+    const name = INGREDIENTS[c.hands.kind].name;
+    const tx = Math.max(48, Math.min(W - 48, c.x + c.face * 88));
+    ctx.save();
+    ctx.font = `bold 12px ${FONT}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(78,52,46,0.9)';
+    ctx.strokeText(name, tx, y - 20);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(name, tx, y - 20);
+    ctx.restore();
   }
   // Carried plate.
   if (c.plate) {
@@ -712,28 +723,32 @@ function drawOrderTicket(ctx, order, x, y, w, h) {
   rr(ctx, x, y, w, h, 8);
   ctx.stroke();
   // Name left, menu price in dollars right (the dish's price, not the score).
-  // In the narrow 5-ticket Rush layout the order number is dropped to fit.
+  // In the narrow 5-ticket Rush layout the number stays on the name and the
+  // price moves to the bottom row, so all five tickets fit with a clear gap.
   const compact = w < 150;
-  const nameText = compact ? recipe.name : `#${order.id} ${recipe.name}`;
-  text(ctx, nameText, x + 10, y + 13, 10, '#4e342e', 'left');
-  text(ctx, `$${recipe.base}`, x + w - 10, y + 13, 12, '#6d4c41', 'right');
+  const nameText = `#${order.id} ${recipe.name}`;
+  text(ctx, nameText, x + 10, y + 13, compact ? 9 : 10, '#4e342e', 'left');
+  if (!compact) text(ctx, `$${recipe.base}`, x + w - 10, y + 13, 12, '#6d4c41', 'right');
   // Dish icon: the finished dish on a little plate, top right under the price.
   ellipse(ctx, x + w - 20, y + 33, 14, 5, '#eceff1');
   drawIngredient(ctx, recipe.ingredients[0], x + w - 20, y + 29, 8, 'ready');
   // Ingredients with their prep-station icon underneath each.
   recipe.ingredients.forEach((kind, i) => {
-    const ix = x + 22 + i * 34;
+    const ix = x + 22 + i * (compact ? 30 : 34);
     drawIngredient(ctx, kind, ix, y + 40, 11, 'ready');
     drawPrepIcon(ctx, INGREDIENTS[kind].prep, ix, y + 58);
   });
-  // Patience: seconds on the left, bar filling the rest.
+  // Patience: seconds on the left, bar filling the rest (shortened in the
+  // compact layout to leave room for the price at the bottom right).
   text(ctx, `${Math.ceil(order.patience)}s`, x + 10, y + h - 8, 10, urgent ? '#d32f2f' : '#6d4c41', 'left');
+  const barW = compact ? w - 84 : w - 50;
   ctx.fillStyle = 'rgba(0,0,0,0.15)';
-  rr(ctx, x + 40, y + h - 12, w - 50, 7, 3);
+  rr(ctx, x + 40, y + h - 12, barW, 7, 3);
   ctx.fill();
   ctx.fillStyle = frac > 0.5 ? '#66bb6a' : frac > 0.25 ? '#ffb300' : '#ff7043';
-  rr(ctx, x + 40, y + h - 12, (w - 50) * frac, 7, 3);
+  rr(ctx, x + 40, y + h - 12, barW * frac, 7, 3);
   ctx.fill();
+  if (compact) text(ctx, `$${recipe.base}`, x + w - 10, y + h - 8, 11, '#6d4c41', 'right');
 }
 
 function drawHud(ctx, world) {
@@ -743,8 +758,10 @@ function drawHud(ctx, world) {
   ctx.fillStyle = '#6d4c41';
   ctx.fillRect(0, HUD_H - 4, W, 4);
   // Five tickets squeeze in during Rush Hour; four at normal width otherwise.
-  const ticketW = world.orders.length > 4 ? 136 : 168;
-  const gap = 6;
+  // Five at 130px + 5px gaps end at 678, leaving a clear gap to the TIME panel.
+  const five = world.orders.length > 4;
+  const ticketW = five ? 130 : 168;
+  const gap = five ? 5 : 6;
   world.orders.forEach((order, i) => {
     drawOrderTicket(ctx, order, 8 + i * (ticketW + gap), 8, ticketW, 86);
   });
@@ -1007,16 +1024,17 @@ export function render(ctx, world, screen, best, newRecord) {
     ctx.translate((world.rng() - 0.5) * mag, (world.rng() - 0.5) * mag);
   }
   const showProgress = screen !== 'title';
+  const showLabels = screen !== 'title';
   drawFloor(ctx);
   drawDecor(ctx, world);
-  drawFridge(ctx, world);
-  drawBoard(ctx, world, showProgress);
-  drawCooker(ctx, world, 'stove', showProgress);
-  drawCooker(ctx, world, 'grill', showProgress);
-  drawCooker(ctx, world, 'oven', showProgress);
-  drawPlating(ctx, world);
-  drawServe(ctx, world);
-  drawTrash(ctx, world);
+  drawFridge(ctx, world, showLabels);
+  drawBoard(ctx, world, showProgress, showLabels);
+  drawCooker(ctx, world, 'stove', showProgress, showLabels);
+  drawCooker(ctx, world, 'grill', showProgress, showLabels);
+  drawCooker(ctx, world, 'oven', showProgress, showLabels);
+  drawPlating(ctx, world, showLabels);
+  drawServe(ctx, world, showLabels);
+  drawTrash(ctx, world, showLabels);
   drawChef(ctx, world);
 
   // Particles.

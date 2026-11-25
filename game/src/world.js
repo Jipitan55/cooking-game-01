@@ -441,7 +441,9 @@ export function stepWorld(world, dt, action) {
       if (slot.state === 'cooking' && slot.t >= ing.time) {
         slot.state = 'ready';
         world.events.push('ready');
-        addParticles(world, STATIONS[key].px, STATIONS[key].py - 20, '#fff176', 6, 40);
+        // Sparkles burst from the food itself, not from the station's
+        // label line below the counter.
+        addParticles(world, STATIONS[key].px, STATIONS[key].y + STATIONS[key].h / 2, '#fff176', 6, 40);
       } else if (slot.state === 'ready' && slot.t >= ing.time + TUNE.burnGraceSeconds) {
         slot.state = 'burnt';
         world.events.push('burnt');
@@ -449,10 +451,11 @@ export function stepWorld(world, dt, action) {
         // A puff of dark smoke as it burns.
         addParticles(world, STATIONS[key].px, STATIONS[key].py - 20, 'rgba(80,80,80,0.8)', 10, 50);
       }
-      // Steam while cooking; sizzle sparks over the grill.
+      // Steam while cooking: rises off the food, above the counter, so it
+      // never drifts across the station label underneath.
       if (slot.state === 'cooking' && world.rng() < 0.1) {
         world.particles.push({
-          x: STATIONS[key].px + (world.rng() - 0.5) * 80, y: STATIONS[key].py - 12,
+          x: STATIONS[key].px + (world.rng() - 0.5) * 80, y: STATIONS[key].y + STATIONS[key].h / 2,
           vx: (world.rng() - 0.5) * 10, vy: -30, t: 0, life: 0.9, color: 'rgba(255,255,255,0.7)', size: 3,
         });
       }
