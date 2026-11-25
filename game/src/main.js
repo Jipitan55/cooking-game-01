@@ -6,6 +6,7 @@ import { render, SCREEN_OVER, SCREEN_PLAY, SCREEN_TITLE } from './render.js';
 import { createInput, readAction } from './input.js';
 import { isMuted, playEvent, toggleMute, unlockAudio } from './audio.js';
 import { stageShot } from './shots.js';
+import { setupTouchControls } from './touch.js';
 
 const canvas = document.getElementById('game');
 const statusEl = document.getElementById('status');
@@ -96,6 +97,7 @@ function fitCanvas() {
 }
 window.addEventListener('resize', fitCanvas);
 fitCanvas();
+setupTouchControls(); // on-screen D-pad / USE / pause / mute on touch devices only
 
 function updateStatus() {
   if (!statusEl) return;

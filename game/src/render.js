@@ -6,6 +6,7 @@ import {
   STAR_TARGETS, STATIONS, W,
 } from './config.js';
 import { nearestStation, plateMatchesRecipe } from './world.js';
+import { isTouchMode } from './touch.js';
 
 const FONT = '"Trebuchet MS", Verdana, sans-serif';
 
@@ -1109,10 +1110,12 @@ export function render(ctx, world, screen, best, newRecord) {
     text(ctx, world.message, W / 2, H - 29, 14, '#ffffff', 'center');
   }
 
-  // Controls hint during play.
+  // Controls hint during play (touch wording on touch devices only).
   if (screen === 'play') {
-    text(ctx, 'WASD move  •  E use station  •  1-0/Q/W fridge pick  •  P pause  •  M mute',
-      W / 2, H - 8, 11, 'rgba(78,52,46,0.75)', 'center');
+    const hint = isTouchMode()
+      ? 'D-pad move  •  USE button  •  tap fridge items'
+      : 'WASD move  •  E use station  •  1-0/Q/W fridge pick  •  P pause  •  M mute';
+    text(ctx, hint, W / 2, H - 8, 11, 'rgba(78,52,46,0.75)', 'center');
   }
 
   drawOverlays(ctx, screen, world, best, newRecord);

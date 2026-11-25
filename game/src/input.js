@@ -42,11 +42,18 @@ export function createInput(canvas) {
   });
   canvas.addEventListener('click', (e) => {
     const p = canvasPoint(e.clientX, e.clientY);
-    // A fridge bin click picks that ingredient.
+    // A fridge bin tap picks that ingredient. The fridge is drawn as a
+    // 2-column x 6-row grid (see drawFridge in render.js), so hit-test the
+    // same grid: row first, then column.
     const fridge = STATIONS.fridge;
     if (p.x >= fridge.x && p.x <= fridge.x + fridge.w && p.y >= fridge.y && p.y <= fridge.y + fridge.h) {
-      const idx = Math.min(FRIDGE_ORDER.length - 1,
-        Math.max(0, Math.floor((p.y - fridge.y) / (fridge.h / FRIDGE_ORDER.length))));
+      const cols = 2;
+      const rows = 6;
+      const cw = (fridge.w - 12) / cols;
+      const ch = (fridge.h - 12) / rows;
+      const col = Math.min(cols - 1, Math.max(0, Math.floor((p.x - fridge.x - 6) / cw)));
+      const row = Math.min(rows - 1, Math.max(0, Math.floor((p.y - fridge.y - 6) / ch)));
+      const idx = row * cols + col;
       input.clickTarget = { x: fridge.px, y: fridge.py, station: 'fridge', select: FRIDGE_ORDER[idx] };
       return;
     }
