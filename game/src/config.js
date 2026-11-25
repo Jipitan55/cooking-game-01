@@ -40,8 +40,13 @@ export const RECIPES = {
   fish: { name: 'Grilled Fish', ingredients: ['fish', 'lemon', 'lettuce'], base: 160 },
   risotto: { name: 'Mushroom Risotto', ingredients: ['rice', 'mushroom', 'cheese'], base: 150 },
   tart: { name: 'Berry Tart', ingredients: ['dough', 'berries', 'lemon'], base: 170 },
+  soup: { name: 'Tomato Soup', ingredients: ['tomato', 'mushroom', 'basil'], base: 130 },
+  pizza: { name: 'Garden Pizza', ingredients: ['dough', 'tomato', 'cheese'], base: 180 },
 };
 export const RECIPE_KEYS = Object.keys(RECIPES);
+
+// Star targets for the shift's final score: 1 / 2 / 3 stars.
+export const STAR_TARGETS = [600, 1200, 2000];
 
 // Stations: rect is the counter/fixture, point is where the chef stands to use it.
 export const STATIONS = {
@@ -50,7 +55,8 @@ export const STATIONS = {
   stove: { label: 'Stove', x: 392, y: 112, w: 176, h: 56, px: 480, py: 196 },
   grill: { label: 'Grill', x: 616, y: 112, w: 144, h: 56, px: 688, py: 196 },
   oven: { label: 'Oven', x: 808, y: 112, w: 132, h: 56, px: 874, py: 196 },
-  plating: { label: 'Plating Counter', x: 380, y: 492, w: 200, h: 52, px: 480, py: 462 },
+  // The plating counter is an island in the middle of the kitchen floor.
+  plating: { label: 'Plating Counter', x: 380, y: 296, w: 200, h: 52, px: 480, py: 384 },
   serve: { label: 'Serve', x: 884, y: 216, w: 62, h: 208, px: 852, py: 320 },
   trash: { label: 'Trash', x: 36, y: 492, w: 88, h: 52, px: 80, py: 462 },
 };

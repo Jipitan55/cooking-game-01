@@ -47,7 +47,7 @@ export function createWorld(seed) {
     level: 1,
     rush: false,
     over: false,
-    chef: { x: 480, y: 330, face: 1, hands: null, plate: null },
+    chef: { x: 480, y: 430, face: 1, hands: null, plate: null, bob: 0, moving: false, chopSwing: 0 },
     orders: [],
     plateOnCounter: { items: [] },
     chopping: null,
@@ -61,12 +61,24 @@ export function createWorld(seed) {
     nextOrderId: 1,
     events: [],
     stats: { chopped: 0, cooked: 0, picked: 0 },
+    // Score breakdown for the results screen: base + tips + combo bonus + rush bonus.
+    breakdown: { base: 0, tips: 0, combo: 0, rush: 0 },
+    servedDishes: {},
+    shakeT: 0,
+    comboPopT: 0,
+    rushT: 0,
+    newRecord: false,
   };
   return world;
 }
 
+const CUSTOMER_SKINS = ['#ffccbc', '#f1c27d', '#e0ac69', '#8d5524', '#ffdbac'];
+const CUSTOMER_SHIRTS = ['#ef5350', '#42a5f5', '#66bb6a', '#ab47bc', '#ffa726', '#26a69a'];
+const CUSTOMER_HAIR = ['#4e342e', '#212121', '#b71c1c', '#616161', '#6d4c41', '#f9a825'];
+
 function orderSlots(world) {
-  return TUNE.orderSlotsStart + (world.level >= TUNE.orderSlotsLevel ? 1 : 0);
+  // Rush Hour squeezes one more ticket onto the board.
+  return TUNE.orderSlotsStart + (world.level >= TUNE.orderSlotsLevel ? 1 : 0) + (world.rush ? 1 : 0);
 }
 
 function spawnInterval(world) {
@@ -85,7 +97,7 @@ function orderPatience(world) {
   return world.rush ? base * TUNE.rushPatienceFactor : base;
 }
 
-function spawnOrder(world) {
+export function spawnOrder(world) {
   const recipe = pickFrom(world.rng, RECIPE_KEYS);
   const patience = orderPatience(world);
   world.orders.push({
@@ -94,6 +106,12 @@ function spawnOrder(world) {
     patience,
     max: patience,
     born: world.time,
+    // The customer waiting at the serve window for this order.
+    cust: {
+      skin: pickFrom(world.rng, CUSTOMER_SKINS),
+      shirt: pickFrom(world.rng, CUSTOMER_SHIRTS),
+      hair: pickFrom(world.rng, CUSTOMER_HAIR),
+    },
   });
   world.nextOrderId += 1;
   world.events.push('order');
@@ -132,7 +150,9 @@ function servePlate(world) {
   if (!plate) return;
   const idx = world.orders.findIndex((o) => plateMatchesRecipe(plate.items, o.recipe));
   if (idx < 0) {
-    say(world, 'No order wants this plate!');
+    // Wrong dish: either not a recipe at all, or a recipe nobody ordered.
+    const isRecipe = RECIPE_KEYS.some((key) => plateMatchesRecipe(plate.items, key));
+    say(world, isRecipe ? 'No order wants this plate!' : 'Not a recipe! Check the tickets.');
     world.events.push('error');
     return;
   }
@@ -143,6 +163,17 @@ function servePlate(world) {
   const points = scoreFor(world, order);
   world.score += points;
   world.served += 1;
+  world.servedDishes[order.recipe] = (world.servedDishes[order.recipe] || 0) + 1;
+  // Split the points into the results-screen breakdown (sums back to the total).
+  const base = RECIPES[order.recipe].base;
+  const tips = Math.round(order.patience);
+  const raw = base + tips;
+  const comboMult = Math.min(TUNE.comboMax, 1 + world.combo * TUNE.comboStep);
+  const rushMult = world.rush ? TUNE.rushScoreFactor : 1;
+  world.breakdown.base += base;
+  world.breakdown.tips += tips;
+  world.breakdown.combo += Math.round(raw * (comboMult - 1));
+  world.breakdown.rush += Math.round(raw * comboMult * (rushMult - 1));
   const newLevel = Math.min(TUNE.levelMax, 1 + Math.floor(world.served / TUNE.levelEveryServed));
   if (newLevel > world.level) {
     world.level = newLevel;
@@ -150,9 +181,17 @@ function servePlate(world) {
     world.events.push('levelup');
   }
   const st = STATIONS.serve;
-  addPopup(world, st.px - 30, st.py - 30, `+${points}`, '#ffd54f');
+  addPopup(world, st.px - 30, st.py - 30, `+${points} pts`, '#ffd54f');
+  if (comboMult > 1 || rushMult > 1) {
+    const mult = (comboMult * rushMult).toFixed(2).replace(/0$/, '');
+    addPopup(world, st.px - 30, st.py - 58, `x${mult}`, '#ff8a65');
+  }
   addParticles(world, st.px, st.py, '#ffd54f', 16, 90);
-  if (world.combo >= 2) addPopup(world, st.px - 30, st.py - 58, `Combo x${world.combo}!`, '#ff8a65');
+  if (world.combo >= 2) {
+    addPopup(world, st.px - 30, st.py - 84, `Combo x${world.combo}!`, '#ff8a65');
+    world.comboPopT = 0.9;
+  }
+  if (world.combo >= 3) world.shakeT = 0.35;
   world.chef.plate = null;
   world.plateOnCounter = { items: [] };
   world.events.push('serve');
@@ -210,6 +249,7 @@ function useCooker(world, key) {
   if (burntIdx >= 0) {
     slots[burntIdx] = null;
     addPopup(world, STATIONS[key].px, STATIONS[key].py - 40, 'Burnt! Binned.', '#ff7043');
+    addParticles(world, STATIONS[key].px, STATIONS[key].py - 20, 'rgba(80,80,80,0.8)', 8, 45);
     world.trashed += 1;
     world.events.push('burnt');
     return;
@@ -339,10 +379,14 @@ export function stepWorld(world, dt, action) {
   world.timeLeft = Math.max(0, SHIFT_SECONDS - world.time);
   const wasRush = world.rush;
   world.rush = world.timeLeft <= 40 && world.timeLeft > 0;
+  if (world.rush) world.rushT += dt;
+  else world.rushT = 0;
   if (world.rush && !wasRush) {
     say(world, 'RUSH HOUR! Orders fly in — 1.5x points!');
     world.events.push('rush');
   }
+  if (world.shakeT > 0) world.shakeT -= dt;
+  if (world.comboPopT > 0) world.comboPopT -= dt;
 
   // Orders arrive.
   world.spawnTimer -= dt;
@@ -371,9 +415,12 @@ export function stepWorld(world, dt, action) {
       world.chopping = null;
     } else {
       world.chopping.t += dt;
-      if (world.rng() < 0.35) {
-        addParticles(world, STATIONS.board.px + (world.rng() - 0.5) * 60, STATIONS.board.py - 6,
-          INGREDIENTS[world.chopping.kind].color, 1, 60);
+      world.chef.chopSwing += dt * 14;
+      if (world.rng() < 0.4) {
+        // Wood chips fly off the board, with a fleck of the ingredient.
+        const bx = STATIONS.board.px + (world.rng() - 0.5) * 60;
+        addParticles(world, bx, STATIONS.board.py - 6,
+          world.rng() < 0.6 ? '#b08968' : INGREDIENTS[world.chopping.kind].color, 1, 70);
       }
       if (world.chopping.t >= world.chopping.total) {
         if (world.chef.hands) world.chef.hands.state = 'ready';
@@ -399,12 +446,28 @@ export function stepWorld(world, dt, action) {
         slot.state = 'burnt';
         world.events.push('burnt');
         addPopup(world, STATIONS[key].px, STATIONS[key].py - 40, 'Burning!', '#ff7043');
+        // A puff of dark smoke as it burns.
+        addParticles(world, STATIONS[key].px, STATIONS[key].py - 20, 'rgba(80,80,80,0.8)', 10, 50);
       }
-      // Steam while cooking.
-      if (slot.state === 'cooking' && world.rng() < 0.08) {
+      // Steam while cooking; sizzle sparks over the grill.
+      if (slot.state === 'cooking' && world.rng() < 0.1) {
         world.particles.push({
           x: STATIONS[key].px + (world.rng() - 0.5) * 80, y: STATIONS[key].py - 12,
-          vx: 0, vy: -28, t: 0, life: 0.9, color: 'rgba(255,255,255,0.7)', size: 3,
+          vx: (world.rng() - 0.5) * 10, vy: -30, t: 0, life: 0.9, color: 'rgba(255,255,255,0.7)', size: 3,
+        });
+      }
+      if (key === 'grill' && slot.state === 'cooking' && world.rng() < 0.22) {
+        world.particles.push({
+          x: STATIONS[key].px + (world.rng() - 0.5) * 90, y: STATIONS[key].py + 8,
+          vx: (world.rng() - 0.5) * 30, vy: -55 - world.rng() * 40, t: 0, life: 0.4 + world.rng() * 0.3,
+          color: world.rng() < 0.5 ? '#ff9800' : '#ffeb3b', size: 2 + world.rng() * 2,
+        });
+      }
+      // Burnt food keeps smoking.
+      if (slot.state === 'burnt' && world.rng() < 0.12) {
+        world.particles.push({
+          x: STATIONS[key].px + (world.rng() - 0.5) * 60, y: STATIONS[key].py - 14,
+          vx: (world.rng() - 0.5) * 8, vy: -24, t: 0, life: 1.1, color: 'rgba(90,90,90,0.65)', size: 4,
         });
       }
     }
@@ -421,6 +484,10 @@ export function stepWorld(world, dt, action) {
       chef.x += (mx / len) * CHEF_SPEED * dt;
       chef.y += (my / len) * CHEF_SPEED * dt;
       if (mx !== 0) chef.face = mx > 0 ? 1 : -1;
+      chef.moving = true;
+      chef.bob += dt * 11;
+    } else {
+      chef.moving = false;
     }
     chef.x = Math.min(936, Math.max(24, chef.x));
     chef.y = Math.min(576, Math.max(HUD_H + 24, chef.y));

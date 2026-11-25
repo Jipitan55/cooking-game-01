@@ -3,11 +3,127 @@
 // ingredient is drawn from shapes, so the game loads nothing over the network.
 import {
   BISTRO_NAME, FRIDGE_ORDER, GAME_NAME, H, HUD_H, INGREDIENTS, RECIPES,
-  STATIONS, W,
+  STAR_TARGETS, STATIONS, W,
 } from './config.js';
 import { nearestStation, plateMatchesRecipe } from './world.js';
 
 const FONT = '"Trebuchet MS", Verdana, sans-serif';
+
+/** A circular progress ring around (x, y); frac 0..1, colour shifts green→yellow→red. */
+function drawProgressRing(ctx, x, y, r, frac, color) {
+  ctx.save();
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = 'rgba(0,0,0,0.45)';
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.strokeStyle = color;
+  ctx.beginPath();
+  ctx.arc(x, y, r, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * Math.max(0, Math.min(1, frac)));
+  ctx.stroke();
+  ctx.restore();
+}
+
+/** Colour for a cooking ring: green while cooking, then yellow → red as it burns. */
+function ringColor(slot, ing) {
+  if (slot.state === 'burnt') return '#ff7043';
+  if (slot.state === 'ready') {
+    const burnFrac = Math.min(1, (slot.t - ing.time) / 6);
+    return burnFrac < 0.5 ? '#66bb6a' : burnFrac < 0.8 ? '#ffb300' : '#ff7043';
+  }
+  const frac = Math.min(1, slot.t / ing.time);
+  return frac < 0.6 ? '#66bb6a' : frac < 0.9 ? '#ffb300' : '#ff7043';
+}
+
+/** Tiny station icon: knife (chop), pot (boil), grill, oven. Drawn under ticket ingredients. */
+function drawPrepIcon(ctx, prep, x, y) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.strokeStyle = '#6d4c41';
+  ctx.fillStyle = '#6d4c41';
+  ctx.lineWidth = 1.6;
+  if (prep === 'chop') {
+    // Knife.
+    ctx.beginPath();
+    ctx.moveTo(-6, 4);
+    ctx.lineTo(4, -5);
+    ctx.lineTo(6, -3);
+    ctx.lineTo(-4, 6);
+    ctx.closePath();
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(-6, 4);
+    ctx.lineTo(-8, 6);
+    ctx.stroke();
+  } else if (prep === 'boil') {
+    // Pot with steam.
+    ctx.beginPath();
+    ctx.arc(0, 2, 5, 0, Math.PI);
+    ctx.fill();
+    ctx.fillRect(-5, 2, 10, 3);
+    ctx.beginPath();
+    ctx.moveTo(-2, -3);
+    ctx.quadraticCurveTo(-4, -6, -2, -8);
+    ctx.moveTo(2, -3);
+    ctx.quadraticCurveTo(4, -6, 2, -8);
+    ctx.stroke();
+  } else if (prep === 'grill') {
+    // Grill grate with flame.
+    ctx.beginPath();
+    ctx.moveTo(-6, 2);
+    ctx.lineTo(6, 2);
+    ctx.moveTo(-6, 5);
+    ctx.lineTo(6, 5);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(0, 1);
+    ctx.lineTo(-3, -5);
+    ctx.lineTo(0, -3);
+    ctx.lineTo(3, -5);
+    ctx.closePath();
+    ctx.fill();
+  } else if (prep === 'bake') {
+    // Oven.
+    ctx.strokeRect(-5, -5, 10, 10);
+    ctx.beginPath();
+    ctx.moveTo(-3, -1);
+    ctx.lineTo(3, -1);
+    ctx.stroke();
+    ctx.fillRect(-3, 2, 6, 3);
+  } else {
+    // Ready ingredient: a small tick.
+    ctx.beginPath();
+    ctx.moveTo(-4, 0);
+    ctx.lineTo(-1, 3);
+    ctx.lineTo(5, -3);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+/** A little flame shape, used on the Rush banner and over the grill. */
+function drawFlame(ctx, x, y, s, color) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(s, s);
+  ctx.fillStyle = color || '#ff7043';
+  ctx.beginPath();
+  ctx.moveTo(0, -12);
+  ctx.quadraticCurveTo(7, -4, 6, 3);
+  ctx.quadraticCurveTo(4, 8, 0, 8);
+  ctx.quadraticCurveTo(-4, 8, -6, 3);
+  ctx.quadraticCurveTo(-7, -4, 0, -12);
+  ctx.fill();
+  ctx.fillStyle = '#ffca28';
+  ctx.beginPath();
+  ctx.moveTo(0, -5);
+  ctx.quadraticCurveTo(4, 0, 3, 4);
+  ctx.quadraticCurveTo(2, 7, 0, 7);
+  ctx.quadraticCurveTo(-2, 7, -3, 4);
+  ctx.quadraticCurveTo(-4, 0, 0, -5);
+  ctx.fill();
+  ctx.restore();
+}
 
 function rr(ctx, x, y, w, h, r) {
   ctx.beginPath();
@@ -156,14 +272,19 @@ export function drawIngredient(ctx, kind, x, y, r, state) {
       break;
     }
     case 'rice': {
-      ctx.fillStyle = '#fffde7';
+      // A bowl of rice: bright white dome in a pale-blue bowl.
+      ctx.fillStyle = '#90caf9';
       ctx.beginPath();
-      ctx.arc(x, y + r * 0.4, r * 0.95, Math.PI, 0);
+      ctx.arc(x, y + r * 0.35, r * 0.95, 0, Math.PI);
       ctx.fill();
-      ctx.fillStyle = '#d7ccc8';
-      circle(ctx, x - r * 0.4, y - r * 0.1, r * 0.09, '#d7ccc8');
-      circle(ctx, x + r * 0.3, y - r * 0.3, r * 0.09, '#d7ccc8');
-      circle(ctx, x + r * 0.1, y + r * 0.1, r * 0.09, '#d7ccc8');
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(x, y + r * 0.15, r * 0.8, Math.PI, 0);
+      ctx.fill();
+      ctx.fillStyle = '#e3f2fd';
+      circle(ctx, x - r * 0.35, y - r * 0.25, r * 0.1, '#e3f2fd');
+      circle(ctx, x + r * 0.25, y - r * 0.4, r * 0.09, '#e3f2fd');
+      circle(ctx, x + r * 0.05, y - r * 0.1, r * 0.09, '#e3f2fd');
       break;
     }
     case 'fish': {
@@ -186,16 +307,39 @@ export function drawIngredient(ctx, kind, x, y, r, state) {
       break;
     }
     case 'dough': {
-      ellipse(ctx, x, y, r, r * 0.7, ing.color);
+      // Golden dough round with a darker crust edge and scored cross.
+      ellipse(ctx, x, y, r, r * 0.72, '#e8b96a');
+      ellipse(ctx, x, y, r * 0.82, r * 0.56, '#f5d9a0');
+      ctx.strokeStyle = '#b07d2b';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(x - r * 0.45, y - r * 0.2);
+      ctx.lineTo(x + r * 0.45, y + r * 0.2);
+      ctx.moveTo(x - r * 0.45, y + r * 0.2);
+      ctx.lineTo(x + r * 0.45, y - r * 0.2);
+      ctx.stroke();
       ctx.fillStyle = '#fff';
-      circle(ctx, x - r * 0.3, y - r * 0.2, r * 0.12, '#fff');
-      circle(ctx, x + r * 0.25, y + r * 0.1, r * 0.1, '#fff');
+      circle(ctx, x - r * 0.3, y - r * 0.3, r * 0.09, '#fff');
+      circle(ctx, x + r * 0.3, y - r * 0.05, r * 0.08, '#fff');
       break;
     }
     default:
       circle(ctx, x, y, r, ing.color);
   }
   ctx.restore();
+  if (state === 'burnt') {
+    // Charred black, with a wisp of smoke curling off it.
+    ctx.fillStyle = 'rgba(30,20,15,0.72)';
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(120,120,120,0.8)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(x - 3, y - r - 2);
+    ctx.quadraticCurveTo(x + 2, y - r - 8, x - 2, y - r - 13);
+    ctx.stroke();
+  }
   if (state === 'raw') {
     ctx.fillStyle = 'rgba(120,120,120,0.25)';
     ctx.beginPath();
@@ -269,10 +413,10 @@ function drawFridge(ctx, world) {
   });
   drawStationLabel(ctx, st, near);
   const sel = INGREDIENTS[world.selected];
-  text(ctx, sel.name, st.x + st.w / 2, st.y + st.h + 28, 12, '#fff', 'center');
+  text(ctx, `Selected: ${sel.name}`, st.x + st.w / 2, st.y + st.h + 28, 12, '#ffe082', 'center');
 }
 
-function drawBoard(ctx, world) {
+function drawBoard(ctx, world, showProgress) {
   const st = STATIONS.board;
   const near = nearestStation(world.chef) === 'board';
   ctx.fillStyle = '#8d6e63';
@@ -283,29 +427,35 @@ function drawBoard(ctx, world) {
   ctx.fill();
   if (world.chopping) {
     const c = world.chopping;
-    drawIngredient(ctx, c.kind, st.x + st.w / 2 - 18, st.y + st.h / 2, 13, 'raw');
-    // Chopping progress bar.
     const pct = Math.min(1, c.t / c.total);
-    ctx.fillStyle = 'rgba(0,0,0,0.35)';
-    rr(ctx, st.x + 20, st.y - 14, st.w - 40, 9, 4);
-    ctx.fill();
-    ctx.fillStyle = '#ffd54f';
-    rr(ctx, st.x + 20, st.y - 14, (st.w - 40) * pct, 9, 4);
-    ctx.fill();
-    // Knife.
+    drawIngredient(ctx, c.kind, st.x + st.w / 2 - 18, st.y + st.h / 2, 13, 'raw');
+    if (showProgress) {
+      // Circular timer around the food being chopped.
+      drawProgressRing(ctx, st.x + st.w / 2 - 18, st.y + st.h / 2, 20, pct,
+        pct < 0.6 ? '#66bb6a' : pct < 0.9 ? '#ffb300' : '#ff7043');
+    }
+    // Knife, chopping up and down with the chef's swing.
+    const swing = world.chef.chopSwing ? Math.abs(Math.sin(world.chef.chopSwing)) : 0;
+    const ky = st.y + 8 + swing * 8;
+    ctx.save();
+    ctx.translate(st.x + st.w - 34, ky + 8);
+    ctx.rotate(0.5);
     ctx.fillStyle = '#eceff1';
     ctx.beginPath();
-    ctx.moveTo(st.x + st.w - 46, st.y + 12);
-    ctx.lineTo(st.x + st.w - 22, st.y + 12);
-    ctx.lineTo(st.x + st.w - 30, st.y + 26);
-    ctx.lineTo(st.x + st.w - 46, st.y + 26);
+    ctx.moveTo(-14, -4);
+    ctx.lineTo(10, -4);
+    ctx.lineTo(14, 2);
+    ctx.lineTo(-14, 6);
     ctx.closePath();
     ctx.fill();
+    ctx.fillStyle = '#5d4037';
+    ctx.fillRect(-20, -3, 7, 7);
+    ctx.restore();
   }
   drawStationLabel(ctx, st, near);
 }
 
-function drawCooker(ctx, world, key) {
+function drawCooker(ctx, world, key, showProgress) {
   const st = STATIONS[key];
   const near = nearestStation(world.chef) === key;
   const base = key === 'stove' ? '#37474f' : key === 'grill' ? '#4e342e' : '#5d4037';
@@ -322,7 +472,14 @@ function drawCooker(ctx, world, key) {
       circle(ctx, cx, cy, 19, '#90a4ae');
       if (slot) {
         circle(ctx, cx, cy, 15, slot.state === 'burnt' ? '#3e2723' : '#bcaaa4');
-        drawIngredient(ctx, slot.kind, cx, cy, 11, slot.state === 'ready' ? 'ready' : 'raw');
+        // Bubbling pot while it boils.
+        if (slot.state === 'cooking') {
+          ctx.fillStyle = 'rgba(255,255,255,0.75)';
+          const bt = world.time * 3 + i * 2;
+          circle(ctx, cx - 6 + Math.sin(bt) * 3, cy - 4, 2, 'rgba(255,255,255,0.75)');
+          circle(ctx, cx + 5, cy + 2 + Math.cos(bt * 1.3) * 2, 1.6, 'rgba(255,255,255,0.75)');
+        }
+        drawIngredient(ctx, slot.kind, cx, cy, 11, slot.state);
       }
     } else if (key === 'grill') {
       ctx.fillStyle = '#263238';
@@ -338,36 +495,41 @@ function drawCooker(ctx, world, key) {
       }
       if (slot) {
         if (slot.state === 'cooking') {
-          ctx.fillStyle = '#ff7043';
-          ctx.beginPath();
-          ctx.moveTo(cx - 10, cy + 14);
-          ctx.lineTo(cx, cy - 2);
-          ctx.lineTo(cx + 10, cy + 14);
-          ctx.closePath();
-          ctx.fill();
+          // Flickering flames under the food.
+          const fl = 0.8 + Math.sin(world.time * 9 + i * 2.4) * 0.25;
+          drawFlame(ctx, cx - 8, cy + 16, 0.7 * fl, '#ff7043');
+          drawFlame(ctx, cx + 8, cy + 16, 0.55 * fl, '#ff9800');
         }
-        drawIngredient(ctx, slot.kind, cx, cy - 4, 12, slot.state === 'ready' ? 'ready' : 'raw');
+        drawIngredient(ctx, slot.kind, cx, cy - 4, 12, slot.state);
       }
     } else {
-      // Oven: door with a window.
+      // Oven: door with a glowing window while baking.
       ctx.fillStyle = '#263238';
       rr(ctx, cx - slotW / 2 + 6, cy - 20, slotW - 12, 40, 5);
       ctx.fill();
-      ctx.fillStyle = slot && slot.state === 'cooking' ? '#ffca28' : '#455a64';
+      const glowing = slot && slot.state === 'cooking';
+      ctx.fillStyle = glowing ? '#ffca28' : '#455a64';
       rr(ctx, cx - slotW / 2 + 12, cy - 12, slotW - 24, 16, 3);
       ctx.fill();
-      if (slot) drawIngredient(ctx, slot.kind, cx, cy + 12, 9, slot.state === 'ready' ? 'ready' : 'raw');
+      if (glowing) {
+        ctx.save();
+        ctx.globalAlpha = 0.35 + Math.sin(world.time * 5) * 0.12;
+        ctx.fillStyle = '#ff9800';
+        rr(ctx, cx - slotW / 2 + 8, cy - 16, slotW - 16, 24, 4);
+        ctx.fill();
+        ctx.restore();
+      }
+      if (slot) drawIngredient(ctx, slot.kind, cx, cy + 12, 9, slot.state);
     }
-    if (slot) {
+    if (slot && showProgress) {
       const ing = INGREDIENTS[slot.kind];
-      const pct = Math.min(1, slot.t / ing.time);
-      const color = slot.state === 'burnt' ? '#ff7043' : slot.state === 'ready' ? '#66bb6a' : '#ffd54f';
-      ctx.fillStyle = 'rgba(0,0,0,0.4)';
-      rr(ctx, cx - 22, st.y - 13, 44, 7, 3);
-      ctx.fill();
-      ctx.fillStyle = color;
-      rr(ctx, cx - 22, st.y - 13, 44 * pct, 7, 3);
-      ctx.fill();
+      // Circular timer around the food: green → yellow → red, red once burnt.
+      const frac = slot.state === 'ready'
+        ? 1 - Math.min(1, (slot.t - ing.time) / 6)
+        : slot.state === 'burnt' ? 0 : Math.min(1, slot.t / ing.time);
+      const ringR = key === 'oven' ? 26 : 22;
+      const ringY = key === 'oven' ? cy + 2 : cy;
+      drawProgressRing(ctx, cx, ringY, ringR, frac, ringColor(slot, ing));
       if (slot.state === 'ready') text(ctx, 'READY!', cx, st.y - 24, 11, '#66bb6a', 'center');
       if (slot.state === 'burnt') text(ctx, 'BURNT!', cx, st.y - 24, 11, '#ff7043', 'center');
     }
@@ -378,8 +540,18 @@ function drawCooker(ctx, world, key) {
 function drawPlating(ctx, world) {
   const st = STATIONS.plating;
   const near = nearestStation(world.chef) === 'plating';
-  ctx.fillStyle = '#8d6e63';
-  rr(ctx, st.x, st.y, st.w, st.h, 6);
+  // Island counter: wooden top with a darker side, standing in the middle of the floor.
+  ctx.fillStyle = 'rgba(0,0,0,0.22)';
+  rr(ctx, st.x + 4, st.y + 10, st.w, st.h, 8);
+  ctx.fill();
+  ctx.fillStyle = '#5d4037';
+  rr(ctx, st.x, st.y + 6, st.w, st.h, 8);
+  ctx.fill();
+  ctx.fillStyle = '#a1887f';
+  rr(ctx, st.x, st.y, st.w, st.h - 6, 8);
+  ctx.fill();
+  ctx.fillStyle = '#d7ccc8';
+  rr(ctx, st.x + 8, st.y + 6, st.w - 16, st.h - 18, 5);
   ctx.fill();
   if (world.plateOnCounter) {
     drawPlate(ctx, st.x + st.w / 2, st.y + st.h / 2 + 4, world.plateOnCounter.items, 1);
@@ -390,6 +562,44 @@ function drawPlating(ctx, world) {
     }
   }
   drawStationLabel(ctx, st, near);
+}
+
+function drawCustomer(ctx, order, x, y) {
+  const frac = Math.max(0, order.patience / order.max);
+  const c = order.cust || { skin: '#ffccbc', shirt: '#ef5350', hair: '#4e342e' };
+  // Body.
+  ctx.fillStyle = c.shirt;
+  rr(ctx, x - 13, y + 8, 26, 22, 9);
+  ctx.fill();
+  // Head.
+  circle(ctx, x, y, 12, c.skin);
+  // Hair.
+  ctx.fillStyle = c.hair;
+  ctx.beginPath();
+  ctx.arc(x, y - 3, 12, Math.PI, 0);
+  ctx.fill();
+  ctx.fillRect(x - 12, y - 4, 24, 4);
+  // Eyes.
+  ctx.fillStyle = '#263238';
+  circle(ctx, x - 4, y, 1.6, '#263238');
+  circle(ctx, x + 4, y, 1.6, '#263238');
+  // Mood mouth: smile while patient, flat, then worried frown.
+  ctx.strokeStyle = '#263238';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  if (frac > 0.5) ctx.arc(x, y + 3, 4, 0.15 * Math.PI, 0.85 * Math.PI);
+  else if (frac > 0.3) {
+    ctx.moveTo(x - 4, y + 6);
+    ctx.lineTo(x + 4, y + 6);
+  } else ctx.arc(x, y + 9, 4, 1.15 * Math.PI, 1.85 * Math.PI);
+  ctx.stroke();
+  // Patience bar above the head.
+  ctx.fillStyle = 'rgba(0,0,0,0.3)';
+  rr(ctx, x - 15, y - 24, 30, 5, 2);
+  ctx.fill();
+  ctx.fillStyle = frac > 0.5 ? '#66bb6a' : frac > 0.25 ? '#ffb300' : '#ff7043';
+  rr(ctx, x - 15, y - 24, 30 * frac, 5, 2);
+  ctx.fill();
 }
 
 function drawServe(ctx, world) {
@@ -407,6 +617,13 @@ function drawServe(ctx, world) {
   ctx.fill();
   ctx.fillStyle = '#6d4c41';
   ctx.fillRect(st.x + st.w / 2 - 1, st.y + 34, 2, 8);
+  // Customers queue at the window, one per open order.
+  const spots = [
+    { x: 838, y: 252 }, { x: 838, y: 306 }, { x: 838, y: 360 }, { x: 838, y: 414 },
+  ];
+  world.orders.slice(0, 4).forEach((order, i) => {
+    drawCustomer(ctx, order, spots[i].x, spots[i].y);
+  });
   drawStationLabel(ctx, st, near);
 }
 
@@ -424,35 +641,62 @@ function drawTrash(ctx, world) {
 
 function drawChef(ctx, world) {
   const c = world.chef;
-  ellipse(ctx, c.x, c.y + 20, 20, 7, 'rgba(0,0,0,0.25)');
+  const S = 1.5; // The chef is 1.5x the old size.
+  const bob = c.moving ? Math.abs(Math.sin(c.bob)) * 3 : Math.sin(world.time * 2) * 0.8;
+  const y = c.y - bob;
+  ellipse(ctx, c.x, c.y + 30, 30, 10, 'rgba(0,0,0,0.25)');
   // Body / apron.
   ctx.fillStyle = '#eceff1';
-  rr(ctx, c.x - 15, c.y - 6, 30, 30, 10);
+  rr(ctx, c.x - 22 * S, y - 9 * S, 45 * S, 45 * S, 15);
   ctx.fill();
   ctx.fillStyle = '#90caf9';
-  rr(ctx, c.x - 15, c.y + 8, 30, 8, 4);
+  rr(ctx, c.x - 22 * S, y + 12 * S, 45 * S, 12 * S, 6);
   ctx.fill();
   // Head.
-  circle(ctx, c.x, c.y - 16, 13, '#ffccbc');
+  circle(ctx, c.x, y - 24 * S, 19, '#ffccbc');
   // Chef hat.
   ctx.fillStyle = '#ffffff';
-  circle(ctx, c.x - 9, c.y - 28, 7, '#ffffff');
-  circle(ctx, c.x, c.y - 31, 8, '#ffffff');
-  circle(ctx, c.x + 9, c.y - 28, 7, '#ffffff');
-  rr(ctx, c.x - 12, c.y - 28, 24, 7, 3);
+  circle(ctx, c.x - 13, y - 42, 10, '#ffffff');
+  circle(ctx, c.x, y - 46, 12, '#ffffff');
+  circle(ctx, c.x + 13, y - 42, 10, '#ffffff');
+  rr(ctx, c.x - 18, y - 42, 36, 10, 4);
   ctx.fill();
   // Eyes.
   ctx.fillStyle = '#263238';
-  circle(ctx, c.x - 5 + c.face * 2, c.y - 16, 1.8, '#263238');
-  circle(ctx, c.x + 5 + c.face * 2, c.y - 16, 1.8, '#263238');
+  circle(ctx, c.x - 7 + c.face * 3, y - 24 * S, 2.6, '#263238');
+  circle(ctx, c.x + 7 + c.face * 3, y - 24 * S, 2.6, '#263238');
+  // Smile.
+  ctx.strokeStyle = '#263238';
+  ctx.lineWidth = 1.8;
+  ctx.beginPath();
+  ctx.arc(c.x + c.face * 2, y - 18 * S, 5, 0.15 * Math.PI, 0.85 * Math.PI);
+  ctx.stroke();
+  // Chopping arm: a knife that swings while the chef chops at the board.
+  if (world.chopping && nearestStation(c) === 'board') {
+    const swing = Math.abs(Math.sin(c.chopSwing)) * 10;
+    ctx.save();
+    ctx.translate(c.x + c.face * 26, y - 10 - swing);
+    ctx.rotate(c.face * 0.4);
+    ctx.fillStyle = '#eceff1';
+    ctx.beginPath();
+    ctx.moveTo(-12, -3);
+    ctx.lineTo(10, -3);
+    ctx.lineTo(13, 3);
+    ctx.lineTo(-12, 4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#5d4037';
+    ctx.fillRect(-18, -3, 7, 7);
+    ctx.restore();
+  }
   // Item in hand, held up.
   if (c.hands) {
-    drawIngredient(ctx, c.hands.kind, c.x + c.face * 22, c.y - 14, 13, c.hands.state);
-    text(ctx, INGREDIENTS[c.hands.kind].name, c.x, c.y - 46, 11, '#fff', 'center');
+    drawIngredient(ctx, c.hands.kind, c.x + c.face * 32, y - 20, 19, c.hands.state);
+    text(ctx, INGREDIENTS[c.hands.kind].name, c.x, y - 68, 12, '#fff', 'center');
   }
   // Carried plate.
   if (c.plate) {
-    drawPlate(ctx, c.x + c.face * 24, c.y + 2, c.plate.items, 0.9);
+    drawPlate(ctx, c.x + c.face * 34, y + 4, c.plate.items, 1.3);
   }
 }
 
@@ -467,19 +711,29 @@ function drawOrderTicket(ctx, order, x, y, w, h) {
   ctx.lineWidth = urgent ? 2.5 : 1.5;
   rr(ctx, x, y, w, h, 8);
   ctx.stroke();
-  text(ctx, `#${order.id} ${recipe.name}`, x + 10, y + 15, 13, '#4e342e', 'left');
+  // Name left, menu price in dollars right (the dish's price, not the score).
+  // In the narrow 5-ticket Rush layout the order number is dropped to fit.
+  const compact = w < 150;
+  const nameText = compact ? recipe.name : `#${order.id} ${recipe.name}`;
+  text(ctx, nameText, x + 10, y + 13, 10, '#4e342e', 'left');
+  text(ctx, `$${recipe.base}`, x + w - 10, y + 13, 12, '#6d4c41', 'right');
+  // Dish icon: the finished dish on a little plate, top right under the price.
+  ellipse(ctx, x + w - 20, y + 33, 14, 5, '#eceff1');
+  drawIngredient(ctx, recipe.ingredients[0], x + w - 20, y + 29, 8, 'ready');
+  // Ingredients with their prep-station icon underneath each.
   recipe.ingredients.forEach((kind, i) => {
-    drawIngredient(ctx, kind, x + 22 + i * 34, y + 42, 12, 'ready');
+    const ix = x + 22 + i * 34;
+    drawIngredient(ctx, kind, ix, y + 40, 11, 'ready');
+    drawPrepIcon(ctx, INGREDIENTS[kind].prep, ix, y + 58);
   });
-  text(ctx, `$${recipe.base}`, x + w - 10, y + 42, 13, '#6d4c41', 'right');
-  // Patience bar.
+  // Patience: seconds on the left, bar filling the rest.
+  text(ctx, `${Math.ceil(order.patience)}s`, x + 10, y + h - 8, 10, urgent ? '#d32f2f' : '#6d4c41', 'left');
   ctx.fillStyle = 'rgba(0,0,0,0.15)';
-  rr(ctx, x + 10, y + h - 14, w - 20, 7, 3);
+  rr(ctx, x + 40, y + h - 12, w - 50, 7, 3);
   ctx.fill();
   ctx.fillStyle = frac > 0.5 ? '#66bb6a' : frac > 0.25 ? '#ffb300' : '#ff7043';
-  rr(ctx, x + 10, y + h - 14, (w - 20) * frac, 7, 3);
+  rr(ctx, x + 40, y + h - 12, (w - 50) * frac, 7, 3);
   ctx.fill();
-  text(ctx, `${Math.ceil(order.patience)}s`, x + w - 10, y + h - 26, 11, urgent ? '#d32f2f' : '#6d4c41', 'right');
 }
 
 function drawHud(ctx, world) {
@@ -488,10 +742,11 @@ function drawHud(ctx, world) {
   ctx.fillRect(0, 0, W, HUD_H);
   ctx.fillStyle = '#6d4c41';
   ctx.fillRect(0, HUD_H - 4, W, 4);
-  const ticketW = 168;
+  // Five tickets squeeze in during Rush Hour; four at normal width otherwise.
+  const ticketW = world.orders.length > 4 ? 136 : 168;
   const gap = 6;
   world.orders.forEach((order, i) => {
-    drawOrderTicket(ctx, order, 8 + i * (ticketW + gap), 8, ticketW, 80);
+    drawOrderTicket(ctx, order, 8 + i * (ticketW + gap), 8, ticketW, 86);
   });
   if (world.orders.length === 0) {
     text(ctx, 'No orders — take a breath!', 12, 48, 15, '#d7ccc8', 'left');
@@ -513,14 +768,18 @@ function drawHud(ctx, world) {
   ctx.fillStyle = world.timeLeft <= 30 ? '#ff7043' : '#66bb6a';
   rr(ctx, tx + 10, 72, 86 * shiftFrac, 6, 3);
   ctx.fill();
-  // Score panel.
+  // Score panel: points, never dollars — the ticket shows the menu price in $.
   const sx = 820;
   ctx.fillStyle = 'rgba(0,0,0,0.35)';
   rr(ctx, sx, 8, 132, 80, 8);
   ctx.fill();
-  text(ctx, 'SCORE', sx + 66, 22, 11, '#d7ccc8', 'center');
-  text(ctx, `${world.score}`, sx + 66, 46, 24, '#ffd54f', 'center');
-  text(ctx, `LV ${world.level}  •  Combo x${world.combo}`, sx + 66, 72, 12, '#ffffff', 'center');
+  text(ctx, 'SCORE (PTS)', sx + 66, 20, 11, '#d7ccc8', 'center');
+  text(ctx, `${world.score}`, sx + 66, 43, 24, '#ffd54f', 'center');
+  const comboText = world.combo >= 1 ? `Combo x${world.combo}` : '';
+  text(ctx, `LV ${world.level}${comboText ? `  •  ${comboText}` : ''}`, sx + 66, 64, 12, '#ffffff', 'center');
+  // Next star target, so the player always knows what to chase.
+  const nextStar = STAR_TARGETS.find((t) => world.score < t);
+  text(ctx, nextStar ? `Next ★ ${nextStar} pts` : '★ ★ ★ Max!', sx + 66, 79, 11, '#ffe082', 'center');
 }
 
 function drawFloor(ctx) {
@@ -533,14 +792,121 @@ function drawFloor(ctx) {
       if (((x / tile) + (y / tile)) % 2 === 0) ctx.fillRect(x, y, tile, tile);
     }
   }
-  // Wall strip under the HUD.
-  ctx.fillStyle = '#bcaaa4';
-  ctx.fillRect(0, HUD_H, W, 14);
+  // Tiled backsplash along the wall under the order board.
+  const bt = 12;
+  for (let x = 0; x < W; x += bt) {
+    ctx.fillStyle = (x / bt) % 2 === 0 ? '#ffccbc' : '#ffe0b2';
+    ctx.fillRect(x, HUD_H, bt, 14);
+    ctx.fillStyle = 'rgba(0,0,0,0.08)';
+    ctx.fillRect(x, HUD_H + 12, bt, 2);
+  }
   ctx.fillStyle = '#8d6e63';
   ctx.fillRect(0, HUD_H + 12, W, 2);
 }
 
-function drawOverlays(ctx, screen, world, best) {
+/** Floor mats, sink, wall shelf with spice jars, hanging pans, plants. */
+function drawDecor(ctx, world) {
+  // Floor mats in front of the work stations.
+  ctx.fillStyle = '#b0a18e';
+  rr(ctx, 186, 196, 158, 28, 6);
+  ctx.fill();
+  rr(ctx, 400, 196, 168, 28, 6);
+  ctx.fill();
+  rr(ctx, 400, 356, 160, 28, 6);
+  ctx.fill();
+  ctx.fillStyle = '#c8a882';
+  rr(ctx, 192, 202, 146, 16, 4);
+  ctx.fill();
+  rr(ctx, 406, 202, 156, 16, 4);
+  ctx.fill();
+  rr(ctx, 406, 362, 148, 16, 4);
+  ctx.fill();
+
+  // Sink with a faucet, bottom left next to the trash.
+  ctx.fillStyle = '#78909c';
+  rr(ctx, 150, 496, 112, 44, 6);
+  ctx.fill();
+  ctx.fillStyle = '#b0bec5';
+  rr(ctx, 158, 502, 96, 32, 4);
+  ctx.fill();
+  ctx.fillStyle = '#4fc3f7';
+  rr(ctx, 164, 508, 84, 20, 3);
+  ctx.fill();
+  ctx.strokeStyle = '#546e7a';
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.moveTo(206, 500);
+  ctx.quadraticCurveTo(206, 482, 218, 486);
+  ctx.stroke();
+
+  // Wall shelf with spice jars above the stove and grill.
+  // The jars sit on the backsplash strip, just below the order board.
+  ctx.fillStyle = '#6d4c41';
+  ctx.fillRect(360, 110, 590, 4);
+  const jarColors = ['#e53935', '#fdd835', '#43a047', '#fb8c00', '#8e24aa'];
+  jarColors.forEach((color, i) => {
+    const jx = 420 + i * 104;
+    ctx.fillStyle = color;
+    rr(ctx, jx - 7, 98, 14, 12, 3);
+    ctx.fill();
+    ctx.fillStyle = '#5d4037';
+    ctx.fillRect(jx - 7, 96, 14, 3);
+  });
+
+  // Hanging pans in the gaps between the top-row stations.
+  [368, 592, 784].forEach((px) => {
+    ctx.strokeStyle = '#5d4037';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(px, 110);
+    ctx.lineTo(px, 118);
+    ctx.stroke();
+    ctx.fillStyle = '#37474f';
+    circle(ctx, px, 130, 13, '#37474f');
+    circle(ctx, px, 130, 9, '#546e7a');
+  });
+
+  // Potted plants in the corners.
+  [[916, 528], [24, 556]].forEach(([px, py]) => {
+    ctx.fillStyle = '#b71c1c';
+    rr(ctx, px - 10, py, 20, 16, 3);
+    ctx.fill();
+    ctx.fillStyle = '#43a047';
+    circle(ctx, px - 6, py - 6, 7, '#43a047');
+    circle(ctx, px + 6, py - 8, 8, '#2e7d32');
+    circle(ctx, px, py - 14, 7, '#66bb6a');
+  });
+}
+
+function drawStar(ctx, x, y, r, filled) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.beginPath();
+  for (let i = 0; i < 10; i += 1) {
+    const rad = i % 2 === 0 ? r : r * 0.45;
+    const a = -Math.PI / 2 + (i * Math.PI) / 5;
+    if (i === 0) ctx.moveTo(Math.cos(a) * rad, Math.sin(a) * rad);
+    else ctx.lineTo(Math.cos(a) * rad, Math.sin(a) * rad);
+  }
+  ctx.closePath();
+  if (filled) {
+    ctx.fillStyle = '#ffb300';
+    ctx.fill();
+  }
+  ctx.strokeStyle = '#b07d2b';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.restore();
+}
+
+function gradeFor(score) {
+  if (score >= STAR_TARGETS[2]) return 'S';
+  if (score >= STAR_TARGETS[1]) return 'A';
+  if (score >= STAR_TARGETS[0]) return 'B';
+  return 'C';
+}
+
+function drawOverlays(ctx, screen, world, best, newRecord) {
   if (screen === 'title') {
     ctx.fillStyle = 'rgba(40,20,10,0.55)';
     ctx.fillRect(0, 0, W, H);
@@ -555,30 +921,74 @@ function drawOverlays(ctx, screen, world, best) {
       'Plate 3 ingredients, then serve at the window. Chain serves for combos!',
     ];
     lines.forEach((line, i) => text(ctx, line, W / 2, 330 + i * 26, 15, '#ffffff', 'center'));
+    text(ctx, `Stars: ${STAR_TARGETS.map((t) => `★${t}`).join('  ')} pts`, W / 2, 442, 14, '#ffe082', 'center');
     if (Math.floor(performance.now() / 500) % 2 === 0) {
-      text(ctx, 'Press ENTER or click to start', W / 2, 470, 22, '#ffd54f', 'center');
+      text(ctx, 'Press ENTER or click to start', W / 2, 472, 22, '#ffd54f', 'center');
     }
-    if (best > 0) text(ctx, `Best score: ${best}`, W / 2, 505, 15, '#ffffff', 'center');
+    if (best > 0) text(ctx, `Best score: ${best} pts`, W / 2, 505, 15, '#ffffff', 'center');
     return;
   }
   if (screen === 'over') {
     ctx.fillStyle = 'rgba(40,20,10,0.6)';
     ctx.fillRect(0, 0, W, H);
     ctx.fillStyle = '#fff8e1';
-    rr(ctx, W / 2 - 240, 120, 480, 340, 14);
+    rr(ctx, W / 2 - 260, 92, 520, 424, 14);
     ctx.fill();
-    text(ctx, 'SHIFT OVER!', W / 2, 160, 40, '#4e342e', 'center');
-    text(ctx, `Score: ${world.score}`, W / 2, 220, 28, '#d84315', 'center');
-    text(ctx, `Dishes served: ${world.served}`, W / 2, 262, 18, '#4e342e', 'center');
-    text(ctx, `Best combo: x${world.bestCombo}`, W / 2, 290, 18, '#4e342e', 'center');
-    text(ctx, `Orders lost: ${world.expired}   •   Chopped: ${world.stats.chopped}   •   Cooked: ${world.stats.cooked}`, W / 2, 318, 15, '#6d4c41', 'center');
-    const verdict = world.score >= 1500 ? 'A legendary shift! The Golden Ladle shines.'
-      : world.score >= 800 ? 'A solid shift — the regulars are happy.'
-      : world.served > 0 ? 'The kitchen survived. Sharpen the knives and go again!'
+    text(ctx, 'SHIFT OVER!', W / 2, 128, 36, '#4e342e', 'center');
+    // Stars earned and the letter grade.
+    const stars = STAR_TARGETS.filter((t) => world.score >= t).length;
+    [-1, 0, 1].forEach((off, i) => {
+      drawStar(ctx, W / 2 - 70 + off * 70, 172, 24, i < stars);
+    });
+    text(ctx, gradeFor(world.score), W / 2 + 190, 172, 44, '#d84315', 'center');
+    text(ctx, 'GRADE', W / 2 + 190, 200, 10, '#6d4c41', 'center');
+    if (newRecord && world.score > 0) {
+      ctx.fillStyle = '#ffb300';
+      rr(ctx, W / 2 - 95, 206, 190, 28, 14);
+      ctx.fill();
+      text(ctx, '★ NEW RECORD! ★', W / 2, 221, 15, '#4e342e', 'center');
+    }
+    text(ctx, `Score: ${world.score} pts   •   Best: ${best} pts`, W / 2, 254, 20, '#d84315', 'center');
+    // Row of dishes served, with counts.
+    const served = Object.entries(world.servedDishes || {});
+    if (served.length > 0) {
+      const totalW = served.length * 64;
+      served.forEach(([key, count], i) => {
+        const dx = W / 2 - totalW / 2 + 32 + i * 64;
+        ellipse(ctx, dx, 292, 22, 8, '#eceff1');
+        drawIngredient(ctx, RECIPES[key].ingredients[0], dx, 286, 12, 'ready');
+        text(ctx, `x${count}`, dx, 312, 12, '#4e342e', 'center');
+      });
+    } else {
+      text(ctx, 'No dishes served', W / 2, 292, 14, '#6d4c41', 'center');
+    }
+    // Score breakdown.
+    const b = world.breakdown || { base: 0, tips: 0, combo: 0, rush: 0 };
+    const rows = [
+      ['Base dishes', b.base],
+      ['Tips (fast service)', b.tips],
+      ['Combo bonus', b.combo],
+      ['Rush Hour bonus', b.rush],
+    ];
+    rows.forEach(([label, value], i) => {
+      const ry = 342 + i * 22;
+      text(ctx, label, W / 2 - 150, ry, 14, '#4e342e', 'left');
+      text(ctx, `${value} pts`, W / 2 + 150, ry, 14, '#4e342e', 'right');
+    });
+    ctx.strokeStyle = '#d7ccc8';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(W / 2 - 150, 432);
+    ctx.lineTo(W / 2 + 150, 432);
+    ctx.stroke();
+    text(ctx, `Dishes served: ${world.served}   •   Best combo: x${world.bestCombo}   •   Orders lost: ${world.expired}`, W / 2, 452, 13, '#6d4c41', 'center');
+    const verdict = stars >= 3 ? 'A legendary shift! The Golden Ladle shines.'
+      : stars >= 2 ? 'A solid shift — the regulars are happy.'
+      : stars >= 1 ? 'The kitchen survived. Sharpen the knives and go again!'
       : 'No dishes served — the orders walked out. Try again!';
-    text(ctx, verdict, W / 2, 352, 15, '#4e342e', 'center');
+    text(ctx, verdict, W / 2, 478, 14, '#4e342e', 'center');
     if (Math.floor(performance.now() / 500) % 2 === 0) {
-      text(ctx, 'Press ENTER to play again', W / 2, 420, 20, '#d84315', 'center');
+      text(ctx, 'Press ENTER to play again', W / 2, 502, 18, '#d84315', 'center');
     }
   }
 }
@@ -588,14 +998,22 @@ export const SCREEN_PLAY = 'play';
 export const SCREEN_OVER = 'over';
 
 /** Draw the whole game for the given screen. */
-export function render(ctx, world, screen, best) {
+export function render(ctx, world, screen, best, newRecord) {
   ctx.clearRect(0, 0, W, H);
+  ctx.save();
+  // Screen shake on a big combo (seeded, so screenshot scenes stay deterministic).
+  if (world.shakeT > 0) {
+    const mag = world.shakeT * 14;
+    ctx.translate((world.rng() - 0.5) * mag, (world.rng() - 0.5) * mag);
+  }
+  const showProgress = screen !== 'title';
   drawFloor(ctx);
+  drawDecor(ctx, world);
   drawFridge(ctx, world);
-  drawBoard(ctx, world);
-  drawCooker(ctx, world, 'stove');
-  drawCooker(ctx, world, 'grill');
-  drawCooker(ctx, world, 'oven');
+  drawBoard(ctx, world, showProgress);
+  drawCooker(ctx, world, 'stove', showProgress);
+  drawCooker(ctx, world, 'grill', showProgress);
+  drawCooker(ctx, world, 'oven', showProgress);
   drawPlating(ctx, world);
   drawServe(ctx, world);
   drawTrash(ctx, world);
@@ -615,16 +1033,53 @@ export function render(ctx, world, screen, best) {
     text(ctx, p.text, p.x, p.y - p.t * 30, 18, p.color, 'center');
   }
   ctx.globalAlpha = 1;
+  ctx.restore();
 
   drawHud(ctx, world);
 
-  // Rush banner.
+  // Rush Hour: warm red-orange vignette and a pulsing border.
   if (world.rush && screen === 'play') {
+    const grad = ctx.createRadialGradient(W / 2, H / 2, H * 0.35, W / 2, H / 2, H * 0.75);
+    grad.addColorStop(0, 'rgba(255,80,0,0)');
+    grad.addColorStop(1, 'rgba(255,60,0,0.30)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
+    const pulse = 0.45 + Math.sin(world.time * 6) * 0.25;
+    ctx.strokeStyle = `rgba(255,90,0,${pulse})`;
+    ctx.lineWidth = 7;
+    ctx.strokeRect(4, 4, W - 8, H - 8);
+    // Banner slides in from the top when Rush starts.
+    const slide = Math.max(0, 1 - world.rushT / 0.5);
+    const by = HUD_H + 6 - slide * 90;
     const blink = Math.floor(performance.now() / 300) % 2 === 0;
     ctx.fillStyle = blink ? '#d32f2f' : '#b71c1c';
-    rr(ctx, W / 2 - 110, HUD_H + 6, 220, 30, 8);
+    rr(ctx, W / 2 - 130, by, 260, 30, 8);
     ctx.fill();
-    text(ctx, 'RUSH HOUR! 1.5x POINTS', W / 2, HUD_H + 22, 15, '#ffffff', 'center');
+    drawFlame(ctx, W / 2 - 108, by + 16, 0.9, '#ffca28');
+    text(ctx, 'RUSH HOUR! 1.5x POINTS', W / 2 + 12, by + 16, 15, '#ffffff', 'center');
+  }
+
+  // Combo pop: big text and a flash when a combo lands.
+  if (world.comboPopT > 0 && world.combo >= 2) {
+    const a = Math.min(1, world.comboPopT * 2);
+    if (world.comboPopT > 0.7) {
+      ctx.fillStyle = `rgba(255,213,79,${(world.comboPopT - 0.7) * 0.4})`;
+      ctx.fillRect(0, 0, W, H);
+    }
+    ctx.save();
+    ctx.globalAlpha = a;
+    const pop = 1 + (0.9 - world.comboPopT) * 0.25;
+    ctx.translate(W / 2, 250);
+    ctx.scale(pop, pop);
+    ctx.font = `bold 40px ${FONT}`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineWidth = 6;
+    ctx.strokeStyle = '#bf360c';
+    ctx.strokeText(`COMBO x${world.combo}!`, 0, 0);
+    ctx.fillStyle = '#ffca28';
+    ctx.fillText(`COMBO x${world.combo}!`, 0, 0);
+    ctx.restore();
   }
 
   // Message pill.
@@ -642,5 +1097,5 @@ export function render(ctx, world, screen, best) {
       W / 2, H - 8, 11, 'rgba(78,52,46,0.75)', 'center');
   }
 
-  drawOverlays(ctx, screen, world, best);
+  drawOverlays(ctx, screen, world, best, newRecord);
 }

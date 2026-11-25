@@ -26,6 +26,10 @@ export function toggleMute() {
   return muted;
 }
 
+export function isMuted() {
+  return muted;
+}
+
 function tone(freq, dur, type, vol, slideTo) {
   if (muted) return;
   const c = audioCtx();
